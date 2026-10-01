@@ -1,0 +1,93 @@
+[
+  {
+    "Dividend": "1",
+    "Divisor": "3",
+    "Quotient": "0.3333333333333333333333333333",
+    "Truncated": 0,
+    "DoubleBits": 4599676419421066582
+  },
+  {
+    "Dividend": "2",
+    "Divisor": "3",
+    "Quotient": "0.6666666666666666666666666667",
+    "Truncated": 0,
+    "DoubleBits": 4604180019048437078
+  },
+  {
+    "Dividend": "-1.99",
+    "Divisor": "1",
+    "Quotient": "-1.99",
+    "Truncated": -1,
+    "DoubleBits": -4611731054423661609
+  },
+  {
+    "Dividend": "100.01",
+    "Divisor": "0.01",
+    "Quotient": "10001",
+    "Truncated": 10001,
+    "DoubleBits": 4666723722223157248
+  },
+  {
+    "Dividend": "79228162514264337593543950335",
+    "Divisor": "10",
+    "Quotient": "7922816251426433759354395033.5",
+    "Truncated": null,
+    "DoubleBits": 5024215744294525338
+  },
+  {
+    "Dividend": "0.0000000000000000000000000001",
+    "Divisor": "1",
+    "Quotient": "0.0000000000000000000000000001",
+    "Truncated": 0,
+    "DoubleBits": 4188260752279232538
+  },
+  {
+    "Dividend": "123456789.987654321",
+    "Divisor": "0.00000001",
+    "Quotient": "12345678998765432.1",
+    "Truncated": 12345678998765432,
+    "DoubleBits": 4847542438922665916
+  },
+  {
+    "Dividend": "9223372036854775807",
+    "Divisor": "1",
+    "Quotient": "9223372036854775807",
+    "Truncated": 9223372036854775807,
+    "DoubleBits": 4890909195324358656
+  },
+  {
+    "Dividend": "9223372036854775808",
+    "Divisor": "1",
+    "Quotient": "9223372036854775808",
+    "Truncated": null,
+    "DoubleBits": 4890909195324358656
+  },
+  {
+    "Dividend": "1",
+    "Divisor": "10000000000000000000000000000",
+    "Quotient": "0.0000000000000000000000000001",
+    "Truncated": 0,
+    "DoubleBits": 4188260752279232538
+  },
+  {
+    "Dividend": "0.1",
+    "Divisor": "1",
+    "Quotient": "0.1",
+    "Truncated": 0,
+    "DoubleBits": 4591870180066957722
+  },
+  {
+    "Dividend": "0.001",
+    "Divisor": "1",
+    "Quotient": "0.001",
+    "Truncated": 0,
+    "DoubleBits": 4562254508917369340
+  },
+  {
+    "Dividend": "12345678901234567890.123456789",
+    "Divisor": "0.7",
+    "Quotient": "17636684144620811271.60493827",
+    "Truncated": null,
+    "DoubleBits": 4895017257876978791
+  }
+]
