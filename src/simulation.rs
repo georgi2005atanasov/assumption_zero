@@ -391,6 +391,59 @@ fn queue(tx: &mpsc::Sender<Out>, p: Value) -> Result<()> {
 fn commands(t: &mut Trader, step: i64) -> Value {
     json!({"kind":"commands","step":step,"commands":std::mem::take(&mut t.outbox)})
 }
+#[derive(Clone, Copy)]
+enum ExchangeChannel {
+    Orders,
+    Market,
+}
+impl ExchangeChannel {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Orders => "orders",
+            Self::Market => "market",
+        }
+    }
+}
+
+/// Only application messages reach the JSON/SBE decoders. Tungstenite handles
+/// ping replies while the stream continues to be polled; keep-alives carry no
+/// trading events and must not advance any application counters or watermarks.
+async fn next_application_message<S>(
+    stream: &mut S,
+    channel: ExchangeChannel,
+) -> Result<tokio_tungstenite::tungstenite::Bytes>
+where
+    S: futures_util::Stream<
+            Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>,
+        > + Unpin,
+{
+    loop {
+        let message = stream
+            .next()
+            .await
+            .with_context(|| {
+                format!(
+                    "{} WebSocket ended before session completion",
+                    channel.name()
+                )
+            })?
+            .with_context(|| format!("{} WebSocket receive failed", channel.name()))?;
+        match (channel, message) {
+            (_, Message::Ping(_) | Message::Pong(_)) => continue,
+            (_, Message::Close(frame)) => bail!(
+                "{} WebSocket closed before session completion: {frame:?}",
+                channel.name()
+            ),
+            (ExchangeChannel::Orders, Message::Text(text)) => return Ok(text.into()),
+            (ExchangeChannel::Market, Message::Binary(bytes)) => return Ok(bytes),
+            _ => bail!(
+                "unexpected application message type on {} WebSocket",
+                channel.name()
+            ),
+        }
+    }
+}
+
 pub async fn run() -> Result<()> {
     let measure = std::env::var("SIM_MEASURE").unwrap_or_default() != "false";
     let url = std::env::var("SIM_EXCHANGE_URL")?;
@@ -400,7 +453,8 @@ pub async fn run() -> Result<()> {
         tcp.set_nodelay(true)?;
     }
     let hello: Packet =
-        serde_json::from_slice(&os.next().await.context("no manifest")??.into_data())?;
+        serde_json::from_slice(&next_application_message(&mut os, ExchangeChannel::Orders).await?)
+            .context("invalid JSON in exchange manifest")?;
     ensure!(hello.kind == "hello", "expected manifest handshake");
     let m = hello.manifest.context("manifest missing")?;
     ensure!(m.version == 1, "protocol version mismatch");
@@ -458,17 +512,23 @@ pub async fn run() -> Result<()> {
     });
     let reader = tokio::spawn(async move {
         let mut stream = stream;
-        while let Some(msg) = stream.next().await {
-            let packet = msg.map_err(anyhow::Error::from).and_then(|m| {
-                let p = serde_json::from_slice::<Packet>(&m.into_data())?;
-                ensure!(p.kind == "reports", "unexpected exchange response");
-                Ok(p)
-            });
+        loop {
+            let packet = next_application_message(&mut stream, ExchangeChannel::Orders)
+                .await
+                .and_then(|data| {
+                    let p = serde_json::from_slice::<Packet>(&data)
+                        .context("invalid JSON in execution report")?;
+                    ensure!(p.kind == "reports", "unexpected exchange response");
+                    Ok(p)
+                });
+            let failed = packet.is_err();
             if report_tx.try_send(packet).is_err() {
-                return Err(anyhow::anyhow!("inbound report queue overflow"));
+                return Err(anyhow::anyhow!("inbound report queue closed or full"));
+            }
+            if failed {
+                return Ok::<_, anyhow::Error>(());
             }
         }
-        Ok::<_, anyhow::Error>(())
     });
     let (market, _) = connect_async(format!("{url}/market")).await?;
     if let tokio_tungstenite::MaybeTlsStream::Plain(tcp) = market.get_ref() {
@@ -477,15 +537,18 @@ pub async fn run() -> Result<()> {
     let (_, mut market) = market.split();
     let (market_tx, mut markets) = mpsc::channel::<Result<Vec<u8>>>(CAPACITY);
     let market_reader = tokio::spawn(async move {
-        while let Some(msg) = market.next().await {
-            let value = msg
-                .map(|m| m.into_data().to_vec())
-                .map_err(anyhow::Error::from);
+        loop {
+            let value = next_application_message(&mut market, ExchangeChannel::Market)
+                .await
+                .map(|bytes| bytes.to_vec());
+            let failed = value.is_err();
             if market_tx.try_send(value).is_err() {
-                return Err(anyhow::anyhow!("market queue overflow"));
+                return Err(anyhow::anyhow!("market queue closed or full"));
+            }
+            if failed {
+                return Ok::<_, anyhow::Error>(());
             }
         }
-        Ok::<_, anyhow::Error>(())
     });
     let started = std::time::Instant::now();
     let mut frames = 0usize;
@@ -658,6 +721,91 @@ pub async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn keepalives_are_filtered_but_data_and_close_frames_are_not() {
+        for channel in [ExchangeChannel::Orders, ExchangeChannel::Market] {
+            let payload = match channel {
+                ExchangeChannel::Orders => Message::Text("{\"kind\":\"reports\"}".into()),
+                ExchangeChannel::Market => Message::Binary(vec![1, 2, 3].into()),
+            };
+            let expected = payload.clone().into_data().to_vec();
+            let mut stream = futures_util::stream::iter([
+                Ok(Message::Pong(vec![].into())),
+                Ok(Message::Ping(vec![7].into())),
+                Ok(Message::Pong(vec![7].into())),
+                Ok(payload),
+                Ok(Message::Close(None)),
+            ]);
+            assert_eq!(
+                next_application_message(&mut stream, channel)
+                    .await
+                    .unwrap(),
+                expected
+            );
+            let error = next_application_message(&mut stream, channel)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("closed before session completion"));
+        }
+        // An empty application message is still invalid JSON, not a keep-alive.
+        let mut empty = futures_util::stream::iter([Ok(Message::Text("".into()))]);
+        let data = next_application_message(&mut empty, ExchangeChannel::Orders)
+            .await
+            .unwrap();
+        assert!(serde_json::from_slice::<Packet>(&data).is_err());
+        let mut wrong = futures_util::stream::iter([Ok(Message::Text("{}".into()))]);
+        assert!(
+            next_application_message(&mut wrong, ExchangeChannel::Market)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn socket_reader_answers_pings_and_skips_unsolicited_pongs() {
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            for channel in [ExchangeChannel::Orders, ExchangeChannel::Market] {
+                socket.send(Message::Ping(vec![9, 8].into())).await.unwrap();
+                let reply = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(reply, Message::Pong(vec![9, 8].into()));
+                socket.send(Message::Pong(vec![].into())).await.unwrap();
+                socket
+                    .send(match channel {
+                        ExchangeChannel::Orders => Message::Text("{}".into()),
+                        ExchangeChannel::Market => Message::Binary(vec![1, 2, 3].into()),
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+        let (socket, _) = connect_async(format!("ws://{address}")).await.unwrap();
+        // Production readers poll split streams while another task owns the sink.
+        let (_sink, mut stream) = socket.split();
+        assert_eq!(
+            next_application_message(&mut stream, ExchangeChannel::Orders)
+                .await
+                .unwrap(),
+            b"{}".as_slice()
+        );
+        assert_eq!(
+            next_application_message(&mut stream, ExchangeChannel::Market)
+                .await
+                .unwrap(),
+            vec![1, 2, 3]
+        );
+        server.await.unwrap();
+    }
+
     #[test]
     fn fill_then_late_cancel_rejection_is_safe_and_duplicate_is_idempotent() {
         let (ledger, runtimes) = crate::state::synthetic();
