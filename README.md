@@ -1,13 +1,20 @@
 # AssumptionZero — Rust
 
-Rust implementation of the C# AssumptionZero market-processing application.
+Rust implementation of the [C# AssumptionZero market-processing application](https://github.com/georgi2005atanasov/AssumptionZero.CSharp).
 The existing C# simulator supplies identical SBE messages to both applications;
 there is no separate Rust simulator.
 
 The flow is receive/reassemble → SBE validation/decode → bounded book → signals →
-pricing and risk → quote intents. Defaults, synthetic initialization, fixture
-format, numeric units, account reservations, fills, and order-state transitions
-match C#. Replay never submits orders; live mode also produces intents only.
+pricing and risk → quote intents. The port follows C#'s strategy rules, synthetic
+initialization scheme, fixture format, numeric units, account reservations, fills,
+and order-state transitions. Both applications default to the same 100 symbols
+in the same order. Replay never submits orders; live mode also produces intents only.
+
+The comparison explores the resource and latency tradeoffs of two implementations.
+C# is already optimized around bounded arrays, reusable buffers, and a single
+market processing loop, with tests for zero managed allocations in warmed core
+processing. A smaller Rust process footprint is useful when it addresses a real
+resource constraint; it is not, by itself, a reason to replace the C# application.
 
 ## Build and test
 
@@ -29,7 +36,7 @@ commands, and report interpretation, see the shared runbook:
 ## Benchmarks
 
 ```bash
-# The existing local PostgreSQL connection is built in; no exports needed.
+# Set PG_CONNECTION for your database; the built-in address is machine-specific.
 "$RUST_ROOT/scripts/run-rust.sh" smoke                   # First 1,000 messages
 "$RUST_ROOT/scripts/run-rust.sh" benchmark               # First 300,000 messages
 "$RUST_ROOT/scripts/run-rust.sh" benchmark --max-messages 100000
@@ -45,7 +52,66 @@ do not compile. The shared coordinator manages the simulator automatically.
 
 Manual replay: start `run-simulator.sh replay` first, then `run-rust.sh replay`.
 Use `--replay-url` for another endpoint and `--fixture` for matching historical
-starting state. Otherwise, both languages use identical synthetic initialization.
+starting state. Without a fixture, both languages estimate balances, instrument
+rules, and starting books; these estimates do not reconstruct historical strategy
+results.
+
+Both applications default to the same **100 symbols in the same order**, defined
+in C#'s `AssumptionZero.App/Program.cs` and Rust's
+[src/symbols.json](src/symbols.json). Keep the lists and their order aligned when
+changing the workload for fixture-free comparisons. With a shared fixture, both
+applications use its instruments; the bundled BTC fixture is for the demo only.
+Correctness hashes must agree before
+comparing performance. Repository paths, database addresses, recording IDs, and
+CPU IDs in the shared runbook are examples from the development machine.
+
+## What the recorded comparison shows
+
+The accepted session on **2 October 2026 at 19:39 UTC** used the same 300,000
+recorded messages, five measured runs per language in alternating order, and the
+same application CPU. Each replay was paced to 60 seconds; the first 30,000
+messages were excluded as warm-up. Both applications completed all runs and
+matched the checked decision and final-state hashes. Values below are medians
+of five per-run measurements.
+
+| Measurement | C# | Rust |
+| --- | ---: | ---: |
+| Process CPU time over about 54.35 measured seconds | 26.44 s | 5.28 s |
+| Resident memory after replay, before reporting | 121.16 MiB | 59.32 MiB |
+| Frame-processing P99 | 20.335 µs | 20.350 µs |
+| Send-to-decision P99 | 367.368 µs | 340.990 µs |
+
+Rust used **80% less process CPU and 51% less resident memory in this session**.
+In absolute terms, that is about **0.39 of one CPU core on average and 62 MiB of
+RAM** at the tested load. Frame-processing P99 was essentially tied; C# had lower
+book-update, signal, and quote-stage P99 values. Rust's lower median
+send-to-decision P99 had overlapping run ranges with C#, so it does not establish
+a consistent latency advantage.
+
+C# is an optimized implementation, and its larger measured process footprint
+does not make it a worse choice. Process CPU includes transport, runtime, and
+instrumentation work outside the trading calculations. The cause of the CPU gap
+has not been established, and there were no measured C# GC collections or pauses.
+Memory includes runtime state and benchmark buffers. The older 77% memory-saving
+claim was withdrawn because sampling phases differed; the 51% figure uses the
+corrected measurement boundary.
+
+These results describe the saved builds and configuration. Both benchmark
+applications had 100 configured instruments, matching the current default lists,
+with only 5 ready at the end. The workload used synthetic starting state. Maximum
+throughput, instrumentation CPU overhead, and production resource savings remain
+unestablished.
+
+The Rust result is promising, but this benchmark alone does not justify a rewrite.
+If the C# application meets its latency and resource budgets, retaining it is a
+reasonable choice. Profile the CPU difference and test representative workloads
+before deciding whether the smaller footprint is worth migration and maintenance
+costs.
+
+Evidence in the C# repository: `docs/benchmark-accepted-2026-10-02.md` and
+`benchmark-results/20261002T193939Z-simulator-compare-9g2o0V/`. The paired JSON,
+per-run summaries, and sample CSVs are the source of these figures. Follow
+`docs/testing.md` there for a new controlled comparison.
 
 ## Application modes
 
