@@ -214,7 +214,7 @@ impl Benchmark {
             "MeasuredFrames":measured.len(),"MeasuredDecisions":measured.iter().map(|f|f.decisions).sum::<usize>(),"MeasuredBytes":measured.iter().map(|f|f.bytes).sum::<usize>(),"MeasuredDurationNanoseconds":duration,
             "ProcessingNanoseconds":latency(|f|f.processing_end_ticks-f.receive_ticks,false),"ReceiveToDecisionNanoseconds":latency(|f|if f.last_decision_ticks==0{0}else{f.last_decision_ticks-f.receive_ticks},true),
             "DecodeNanoseconds":latency(|f|f.decode_ticks,true),"BookNanoseconds":latency(|f|f.book_ticks,true),"SignalNanoseconds":latency(|f|f.signal_ticks,true),"QuoteNanoseconds":latency(|f|f.quote_ticks,true),
-            "CpuNanoseconds":cpu_ns,"CpuCores":if duration==0{0.0}else{cpu_ns as f64/duration as f64},"CpuNanosecondsPerFrame":if measured.is_empty(){0.0}else{cpu_ns as f64/measured.len() as f64},"ResidentBytes":memory("VmRSS:"),"PeakResidentBytes":memory("VmHWM:"),
+            "CpuNanoseconds":cpu_ns,"CpuCores":if duration==0{0.0}else{cpu_ns as f64/duration as f64},"CpuNanosecondsPerFrame":if measured.is_empty(){0.0}else{cpu_ns as f64/measured.len() as f64},"MemorySnapshotPhase":"after_replay_before_report","ResidentBytes":memory("VmRSS:"),"PeakResidentBytes":memory("VmHWM:"),
             "ManagedHeapBytes":null,"ManagedAllocatedBytes":null,"ManagedAllocatedBytesPerFrame":null,"GcCollections":null,"GcPauseNanoseconds":null,"IndividualGcPauseNanoseconds":Latency::default(),"Diagnostic":false,"GcPauses":[],"Frames":self.frames,
             "AllocatorAllocatedBytes":allocation,"AllocatorAllocatedBytesPerFrame":if measured.is_empty(){0.0}else{allocation as f64/measured.len() as f64},"AllocationScope":"process requested allocator bytes, including reallocations; measured window"})
     }
