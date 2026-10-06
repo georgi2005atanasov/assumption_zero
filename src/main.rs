@@ -32,6 +32,7 @@ async fn main() -> Result<()> {
         .to_lowercase()
         .as_str()
     {
+        "simulatedexchange" => assumption_zero::simulation::run().await,
         "replay" => replay(log).await,
         "seeddata" => live::capture(log).await,
         "normalexecution" => live::normal(log).await,

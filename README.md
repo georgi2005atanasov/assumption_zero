@@ -8,7 +8,8 @@ The flow is receive/reassemble → SBE validation/decode → bounded book → si
 pricing and risk → quote intents. The port follows C#'s strategy rules, synthetic
 initialization scheme, fixture format, numeric units, account reservations, fills,
 and order-state transitions. Both applications default to the same 100 symbols
-in the same order. Replay never submits orders; live mode also produces intents only.
+in the same order. Normal replay and live mode produce intents only; the new
+`SimulatedExchange` mode sends orders to a local controlled exchange.
 
 The comparison explores the resource and latency tradeoffs of two implementations.
 C# is already optimized around bounded arrays, reusable buffers, and a single
@@ -64,6 +65,34 @@ applications use its instruments; the bundled BTC fixture is for the demo only.
 Correctness hashes must agree before
 comparing performance. Repository paths, database addresses, recording IDs, and
 CPU IDs in the shared runbook are examples from the development machine.
+
+## Controlled exchange benchmark
+
+The new `SimulatedExchange` mode sends orders to a local C# exchange and receives
+acknowledgements, rejections, partial/full fills, and cancellations. Both clients
+update inventory and the shared risk ledger before subsequent decisions. The
+normal replay and live modes retain their existing intent-only behavior.
+
+The default comparison now offers **500,000 messages over 600 seconds per run**,
+with 50,000 warmup messages, repeated deterministic equivalence checks, a baseline
+pair, and five alternating measured pairs. This is about two hours plus preflight.
+It uses recorded market data and controlled synthetic execution, with no Binance
+calls. Async order counts can differ, so matching frames alone is not evidence of
+an equal workload or a rewrite decision.
+
+```bash
+/home/sparrow/RiderProjects/AssumptionZero/scripts/run-closed-loop-benchmark.sh prepare
+# Close other applications before the measurement run.
+/home/sparrow/RiderProjects/AssumptionZero/scripts/run-closed-loop-benchmark.sh run \
+  --max-messages 500000 --target-duration-seconds 600 \
+  --app-cpus 2 --simulator-cpus 0,4,6,8,10,12,14
+```
+
+The CPU IDs above match the development machine. Preparation fingerprints the
+build; the run writes reconciled results and an archive to return for analysis.
+See [the closed-loop runbook in the C# repository](https://github.com/georgi2005atanasov/AssumptionZero.CSharp/blob/main/docs/closed-loop-benchmark.md) for protocol, measurement boundaries, readiness limits, and options.
+The published October 2 figures below still describe the earlier market-only
+benchmark; they are not results of this new order-cycle test.
 
 ## What the recorded comparison shows
 

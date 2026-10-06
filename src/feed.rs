@@ -124,6 +124,7 @@ pub struct Feed {
     pub log: bool,
     pub benchmark: Option<Benchmark>,
     pub trace: Option<std::io::BufWriter<std::fs::File>>,
+    pub simulation_decisions: Option<Vec<usize>>,
     pub decisions: usize,
     pub actionable: usize,
     pub measure_allocations: bool,
@@ -145,6 +146,7 @@ impl Feed {
             log,
             benchmark: None,
             trace: None,
+            simulation_decisions: None,
             decisions: 0,
             actionable: 0,
             measure_allocations: false,
@@ -157,6 +159,9 @@ impl Feed {
         }
     }
     fn emit(&mut self, r: usize, d: Decision) -> Result<()> {
+        if let Some(v) = &mut self.simulation_decisions {
+            v.push(r);
+        }
         if let Some(b) = &mut self.benchmark {
             b.decision(self.runtimes[r].instrument.id, d);
         }

@@ -51,6 +51,18 @@ impl Ledger {
         self.free[a] = free;
         self.locked[a] = locked;
     }
+    pub fn raw_free(&self, a: usize) -> Decimal {
+        self.free[a]
+    }
+    pub fn locked(&self, a: usize) -> Decimal {
+        self.locked[a]
+    }
+    pub fn reserved(&self, a: usize) -> Decimal {
+        self.reserved[a]
+    }
+    pub fn pending_count(&self) -> usize {
+        self.intents.iter().filter(|i| i.id != 0).count()
+    }
     pub fn free(&self, a: usize) -> Decimal {
         (self.free[a] - self.reserved[a]).max(Decimal::ZERO)
     }
@@ -69,7 +81,12 @@ impl Ledger {
             return None;
         }
         let a = self.asset(if buy { &i.quote } else { &i.base })?;
-        let amount = i.quantity(q) * if buy { i.price(p) } else { Decimal::ONE };
+        let amount = i.quantity(q)
+            * if buy {
+                i.price(p) * (Decimal::ONE + self.fee)
+            } else {
+                Decimal::ONE
+            };
         if require_available && amount > self.free(a) {
             return None;
         }
@@ -535,6 +552,15 @@ impl Runtime {
         }
         o.id = id;
         true
+    }
+    pub fn confirm_intent(&mut self, buy: bool, id: i64, a: &mut Ledger) -> anyhow::Result<()> {
+        let s = usize::from(!buy);
+        anyhow::ensure!(
+            self.pending[s].intent == id,
+            "acknowledgement intent mismatch"
+        );
+        self.clear_intent(s, a);
+        Ok(())
     }
     fn clear_intent(&mut self, s: usize, a: &mut Ledger) {
         if self.pending[s].intent > 0 {
